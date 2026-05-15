@@ -1,6 +1,6 @@
 # web_ss_buddy
 
-Python script that takes screenshots from plain URLs or `httpx` output and generates a PDF screenshot report.
+Python script that takes screenshots from plain URLs or `httpx` output and generates a PDF screenshot report plus a CSV summary.
 
 Vibe coded this to help with web enumeration, especially when working with a large number of live web services. After identifying valid web targets, this tool helps screen capture what each target looks like in a browser.
 
@@ -19,6 +19,7 @@ Enumeration workflow:
 - Captures browser-level prompts such as basic auth or digest auth popups
 - Records the original URL and final URL
 - Generates a PDF screenshot report
+- Generates a CSV summary
 - Saves screenshots locally
 
 ## Installation
@@ -39,7 +40,9 @@ Install Chromium for Playwright:
 
     playwright install chromium
 
-Install system dependencies:
+Install system dependencies.
+
+On Debian/Ubuntu:
 
     sudo apt install xvfb scrot
 
@@ -54,6 +57,10 @@ Make the script executable:
 Example with URL list:
 
     ./web_ss_buddy.py urls.txt -o report.pdf
+
+Example with custom CSV output:
+
+    ./web_ss_buddy.py urls.txt -o report.pdf --csv results.csv
 
 Show help:
 
@@ -97,6 +104,7 @@ This creates:
 
     screenshots/
     report.pdf
+    report.csv
 
 ## Options
 
@@ -120,6 +128,10 @@ Set browser screenshot size:
 
     ./web_ss_buddy.py live_web.txt -o report.pdf --width 1366 --height 768
 
+Choose a custom CSV filename:
+
+    ./web_ss_buddy.py live_web.txt -o report.pdf --csv results.csv
+
 ## PDF Output
 
 The generated PDF report contains these fields for each target:
@@ -127,6 +139,8 @@ The generated PDF report contains these fields for each target:
     Input line
     Original URL
     Final URL
+    Response Code
+    Title
     Date and time screenshot was taken
     Screenshot
 
@@ -137,8 +151,29 @@ Field meaning:
 | Input line | The original line from the input file |
 | Original URL | The URL extracted from the input line |
 | Final URL | The final browser URL after redirects or JavaScript routing |
+| Response Code | The browser-observed HTTP response code |
+| Title | The page title reported by the browser |
 | Date and time screenshot was taken | Timestamp of when the screenshot was captured |
 | Screenshot | Browser screenshot of the target |
+
+## CSV Output
+
+The tool creates a CSV summary by default using the same output filename as the PDF.
+
+The CSV contains these fields:
+
+| Field | Description |
+|---|---|
+| Target | Hostname or IP extracted from the URL |
+| Port | Port extracted from the URL, or default port based on scheme |
+| URL | Original URL extracted from the input line |
+| Final URL | Final browser URL after redirects or JavaScript routing |
+| Response Code | Browser-observed HTTP response code |
+| Title | Page title reported by the browser |
+
+To choose a custom CSV filename:
+
+    ./web_ss_buddy.py urls.txt -o report.pdf --csv results.csv
 
 ## Example Report Entry
 
@@ -151,5 +186,12 @@ The PDF report will include:
     Input line: https://example.com [200] [Example Domain] [nginx]
     Original URL: https://example.com
     Final URL: https://example.com
+    Response Code: 200
+    Title: Example Domain
     Date and time screenshot was taken: 2026-05-15 12:00:00
     Screenshot: Embedded screenshot image
+
+The CSV report will include:
+
+    Target,Port,URL,Final URL,Response Code,Title
+    example.com,443,https://example.com,https://example.com,200,Example Domain

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import hashlib
 import re
 import subprocess
@@ -16,6 +17,7 @@ from pyvirtualdisplay import Display
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
@@ -23,7 +25,6 @@ from reportlab.platypus import (
     Image as PdfImage,
     PageBreak,
 )
-from reportlab.lib.styles import getSampleStyleSheet
 
 
 SCREENSHOTS_DIR = Path("screenshots")
@@ -38,6 +39,15 @@ ART = r"""
 |__,__/\__/_.__/ /___/___/ /_.__/\_,_/\_,_/\_,_/\_, / 
                                                /___/   
 """
+
+
+class HelpFormatter(argparse.RawDescriptionHelpFormatter):
+    def __init__(self, prog):
+        super().__init__(
+            prog,
+            max_help_position=30,
+            width=100,
+        )
 
 
 def extract_url(line: str):
@@ -98,19 +108,73 @@ def get_browser_url(page, fallback_url: str):
     return fallback_url
 
 
+def get_page_title(page):
+    if not page:
+        return ""
+
+    try:
+        return page.title() or ""
+    except Exception:
+        return ""
+
+
+def get_target_and_port(url: str):
+    parsed = urlparse(url)
+    target = parsed.hostname or parsed.netloc or url
+
+    if parsed.port:
+        port = parsed.port
+    elif parsed.scheme == "https":
+        port = 443
+    elif parsed.scheme == "http":
+        port = 80
+    else:
+        port = ""
+
+    return target, port
+
+
 def screenshot_url(context, raw_line: str, url: str, out_path: Path, wait_seconds: int):
     final_url = url
+    final_response_code = ""
+    title = ""
     page = None
 
     try:
         page = context.new_page()
 
+        def track_response(response):
+            """
+            Track browser-observed main-frame document responses.
+
+            This helps capture the final response code after redirects.
+            """
+            nonlocal final_response_code
+
+            try:
+                request = response.request
+
+                if (
+                    request.is_navigation_request()
+                    and request.frame == page.main_frame
+                    and request.resource_type == "document"
+                ):
+                    final_response_code = response.status
+            except Exception:
+                pass
+
+        page.on("response", track_response)
+
         try:
-            page.goto(
+            response = page.goto(
                 url,
                 wait_until="domcontentloaded",
                 timeout=20000,
             )
+
+            if response:
+                final_response_code = response.status
+
         except PlaywrightTimeoutError:
             pass
         except Exception:
@@ -128,14 +192,21 @@ def screenshot_url(context, raw_line: str, url: str, out_path: Path, wait_second
             if current_url and current_url != "about:blank":
                 final_url = current_url
 
+        title = get_page_title(page)
         screenshot_taken_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         desktop_screenshot(out_path)
 
+        target, port = get_target_and_port(url)
+
         return {
             "raw_line": raw_line,
+            "target": target,
+            "port": port,
             "url": url,
             "final_url": final_url,
+            "response_code": final_response_code,
+            "title": title,
             "screenshot": out_path,
             "screenshot_taken_at": screenshot_taken_at,
         }
@@ -148,10 +219,16 @@ def screenshot_url(context, raw_line: str, url: str, out_path: Path, wait_second
             f"Screenshot failed\n\nURL: {url}\n\nReason:\n{str(e)[:700]}",
         )
 
+        target, port = get_target_and_port(url)
+
         return {
             "raw_line": raw_line,
+            "target": target,
+            "port": port,
             "url": url,
             "final_url": final_url,
+            "response_code": final_response_code,
+            "title": title,
             "screenshot": out_path,
             "screenshot_taken_at": screenshot_taken_at,
         }
@@ -187,18 +264,20 @@ def build_pdf(results, pdf_path: Path):
         story.append(Paragraph(f"<b>{item['url']}</b>", styles["Heading2"]))
         story.append(Spacer(1, 0.4 * cm))
 
-        story.append(Paragraph("<b>Input line</b>", styles["Heading3"]))
+        story.append(Paragraph("<b>Input Line</b>", styles["Heading3"]))
         story.append(Paragraph(item["raw_line"], styles["Code"]))
         story.append(Spacer(1, 0.3 * cm))
 
         story.append(Paragraph(f"<b>Original URL:</b> {item['url']}", styles["Normal"]))
         story.append(Paragraph(f"<b>Final URL:</b> {item['final_url']}", styles["Normal"]))
+        story.append(Paragraph(f"<b>Response Code:</b> {item['response_code']}", styles["Normal"]))
+        story.append(Paragraph(f"<b>Title:</b> {item['title']}", styles["Normal"]))
         story.append(Spacer(1, 0.5 * cm))
 
         story.append(Paragraph("<b>Screenshot</b>", styles["Heading3"]))
         story.append(
             Paragraph(
-                f"<b>Date and time screenshot was taken:</b> {item['screenshot_taken_at']}",
+                f"<b>Date and Time Screenshot Was Taken:</b> {item['screenshot_taken_at']}",
                 styles["Normal"],
             )
         )
@@ -215,35 +294,48 @@ def build_pdf(results, pdf_path: Path):
     doc.build(story)
 
 
-def print_examples():
-    examples = r"""
-Examples:
+def clean_csv_text(value):
+    """
+    Make browser text safer for Excel CSV display.
 
-  Plain URL input file:
-    https://example.com
-    http://example.com:8080
+    Some page titles contain non-breaking spaces. Excel may display those badly
+    if the CSV is opened with the wrong encoding.
+    """
+    if value is None:
+        return ""
 
-  httpx-style input file:
-    https://example.com [200] [Example Domain] [nginx]
-    http://192.168.1.10:8080 [401] [Login] [Apache]
+    value = str(value)
+    value = value.replace("\u00a0", " ")
+    value = value.replace("\u202f", " ")
 
-Usage:
+    return value
 
-  python3 web_ss_buddy.py urls.txt -o report.pdf
 
-  python3 web_ss_buddy.py live_web.txt -o screenshots.pdf --wait 15
+def build_csv(results, csv_path: Path):
+    fieldnames = [
+        "Target",
+        "Port",
+        "URL",
+        "Final URL",
+        "Response Code",
+        "Title",
+    ]
 
-  python3 web_ss_buddy.py urls.txt -o report.pdf --ignore-cert-errors
+    with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
 
-  python3 web_ss_buddy.py urls.txt -o report.pdf --skip-invalid
-
-  python3 web_ss_buddy.py urls.txt -o report.pdf --user-agent "Mozilla/5.0"
-
-Help:
-
-  python3 web_ss_buddy.py -h
-"""
-    print(examples)
+        for item in results:
+            writer.writerow(
+                {
+                    "Target": clean_csv_text(item.get("target", "")),
+                    "Port": clean_csv_text(item.get("port", "")),
+                    "URL": clean_csv_text(item.get("url", "")),
+                    "Final URL": clean_csv_text(item.get("final_url", "")),
+                    "Response Code": clean_csv_text(item.get("response_code", "")),
+                    "Title": clean_csv_text(item.get("title", "")),
+                }
+            )
 
 
 def parse_input_file(input_path: Path, skip_invalid: bool):
@@ -305,10 +397,10 @@ def parse_input_file(input_path: Path, skip_invalid: bool):
 def main():
     parser = argparse.ArgumentParser(
         prog="web_ss_buddy",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=HelpFormatter,
         description=(
             "Take browser screenshots from plain URLs or httpx-style output "
-            "and generate a PDF report."
+            "and generate a PDF report plus a CSV summary."
         ),
         epilog="""
 Input formats supported:
@@ -322,57 +414,66 @@ Input formats supported:
 Examples:
 
   python3 web_ss_buddy.py urls.txt -o report.pdf
+  python3 web_ss_buddy.py urls.txt -o report.pdf --csv results.csv
   python3 web_ss_buddy.py live_web.txt -o report.pdf --wait 15
   python3 web_ss_buddy.py urls.txt -o report.pdf --skip-invalid
   python3 web_ss_buddy.py urls.txt -o report.pdf --ignore-cert-errors
   python3 web_ss_buddy.py urls.txt -o report.pdf --user-agent "Mozilla/5.0"
 
-Help:
-
-  python3 web_ss_buddy.py -h
-
 Important:
 
   URLs must include http:// or https://.
   The script does not assume a scheme.
-"""
+""",
     )
 
     parser.add_argument(
         "input_file",
-        help="Path to input file containing plain URLs or httpx-style output.",
+        help="Input file with plain URLs or httpx-style output.",
     )
 
     parser.add_argument(
         "-o",
         "--output",
         required=True,
-        help="Output PDF filename, for example report.pdf",
+        metavar="OUTPUT",
+        help="Output PDF filename, for example report.pdf.",
+    )
+
+    parser.add_argument(
+        "--csv",
+        metavar="CSV",
+        default=None,
+        help="Output CSV filename. Default: output name with .csv.",
     )
 
     parser.add_argument(
         "--wait",
+        metavar="WAIT",
         type=int,
         default=10,
-        help="Seconds to wait before taking each screenshot. Default: 10",
+        help="Seconds to wait before each screenshot. Default: 10.",
     )
 
     parser.add_argument(
         "--width",
+        metavar="WIDTH",
         type=int,
         default=DEFAULT_WIDTH,
-        help=f"Browser/X display width. Default: {DEFAULT_WIDTH}",
+        help=f"Browser/X display width. Default: {DEFAULT_WIDTH}.",
     )
 
     parser.add_argument(
         "--height",
+        metavar="HEIGHT",
         type=int,
         default=DEFAULT_HEIGHT,
-        help=f"Browser/X display height. Default: {DEFAULT_HEIGHT}",
+        help=f"Browser/X display height. Default: {DEFAULT_HEIGHT}.",
     )
 
     parser.add_argument(
         "--user-agent",
+        metavar="USER_AGENT",
         default=None,
         help="Custom User-Agent string.",
     )
@@ -380,28 +481,18 @@ Important:
     parser.add_argument(
         "--ignore-cert-errors",
         action="store_true",
-        help="Ignore certificate errors. Do NOT use this if you want to capture SSL warning pages.",
+        help="Ignore certificate errors.",
     )
 
     parser.add_argument(
         "--skip-invalid",
         action="store_true",
-        help="Skip invalid input lines instead of exiting with an error.",
-    )
-
-    parser.add_argument(
-        "--examples",
-        action="store_true",
-        help="Show usage examples and exit.",
+        help="Skip invalid input lines.",
     )
 
     args = parser.parse_args()
 
     print(ART)
-
-    if args.examples:
-        print_examples()
-        sys.exit(0)
 
     input_path = Path(args.input_file)
 
@@ -413,6 +504,8 @@ Important:
 
     if output_path.suffix.lower() != ".pdf":
         output_path = output_path.with_suffix(".pdf")
+
+    csv_path = Path(args.csv) if args.csv else output_path.with_suffix(".csv")
 
     SCREENSHOTS_DIR.mkdir(exist_ok=True)
 
@@ -465,7 +558,9 @@ Important:
 
                 print(f"    Original URL: {result['url']}")
                 print(f"    Final URL: {result['final_url']}")
-                print(f"    Screenshot time: {result['screenshot_taken_at']}")
+                print(f"    Response Code: {result['response_code']}")
+                print(f"    Title: {result['title']}")
+                print(f"    Screenshot Time: {result['screenshot_taken_at']}")
                 print(f"    Screenshot: {result['screenshot']}")
 
                 results.append(result)
@@ -481,6 +576,7 @@ Important:
             run_browser()
 
         build_pdf(results, output_path)
+        build_csv(results, csv_path)
 
     except KeyboardInterrupt:
         print()
@@ -505,6 +601,7 @@ Important:
     print()
     print(f"[+] Screenshots saved in: {SCREENSHOTS_DIR}/")
     print(f"[+] PDF report saved as: {output_path}")
+    print(f"[+] CSV report saved as: {csv_path}")
 
 
 if __name__ == "__main__":

@@ -69,7 +69,8 @@ def isolated_display(width: int, height: int):
 
         def add_cookie(display_name):
             subprocess.run(
-                ["xauth", "-f", str(authority), "add", display_name, ".", cookie],
+                ["xauth", "-f", str(authority)],
+                input=f"add {display_name} . {cookie}\n", text=True,
                 check=True, capture_output=True, timeout=5,
             )
 

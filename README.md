@@ -9,7 +9,7 @@ Vibe coded this to help with web enumeration, especially when working with a lar
 Use Linux with Python 3.10 or newer. On Debian and Kali, install system Chromium and the virtual desktop tools, then install the CLI with pipx.
 
 ```sh
-sudo apt install git pipx chromium xvfb xauth scrot fonts-dejavu-core
+sudo apt install git pipx chromium xvfb xauth scrot fonts-dejavu-core fonts-droid-fallback
 git clone https://github.com/0xdbyx/web_ss_buddy.git
 cd web_ss_buddy
 pipx install .

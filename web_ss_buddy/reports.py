@@ -109,11 +109,11 @@ def build_html(results, path: Path):
         temporary.write_text(template.replace("__REPORT_DATA__", payload, 1), encoding="utf-8")
 
 
-def pdf_text(value):
+def pdf_text(value, cjk_font):
     text = str(value) if value not in (None, "") else "—"
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "\ufffd", text)
     text = "".join(
-        f'<font name="STSong-Light">{escape(part, quote=False)}</font>' if index % 2 else escape(part, quote=False)
+        f'<font name="{cjk_font}">{escape(part, quote=False)}</font>' if index % 2 else escape(part, quote=False)
         for index, part in enumerate(CJK.split(text))
     )
     text = text.replace("\n", "<br/>").replace("\t", "    ")
@@ -122,7 +122,13 @@ def pdf_text(value):
 
 def build_pdf(results, path: Path):
     styles = getSampleStyleSheet()
-    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    fallback = Path("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf")
+    if fallback.is_file():
+        cjk_font = "ReportCJK"
+        pdfmetrics.registerFont(TTFont(cjk_font, str(fallback)))
+    else:
+        cjk_font = "STSong-Light"
+        pdfmetrics.registerFont(UnicodeCIDFont(cjk_font))
     font = "Helvetica"
     for location in (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -154,17 +160,17 @@ def build_pdf(results, path: Path):
             url = result.target.url
             display_url = url if len(url) <= 120 else url[:117] + "…"
             details = [
-                Paragraph(pdf_text(display_url), heading),
+                Paragraph(pdf_text(display_url, cjk_font), heading),
                 Paragraph(fields[0][0], label),
-                Paragraph(pdf_text(fields[0][1]), code),
+                Paragraph(pdf_text(fields[0][1], cjk_font), code),
             ]
             for name, value in fields[1:-1]:
-                details.append(Paragraph(f"<b>{name}:</b> {pdf_text(value)}", body))
+                details.append(Paragraph(f"<b>{name}:</b> {pdf_text(value, cjk_font)}", body))
 
             timestamp_label, timestamp = fields[-1]
             picture = [
                 Paragraph("Screenshot", label),
-                Paragraph(f"<b>{timestamp_label}:</b> {pdf_text(timestamp)}", body),
+                Paragraph(f"<b>{timestamp_label}:</b> {pdf_text(timestamp, cjk_font)}", body),
             ]
             if result.screenshot and result.screenshot.is_file():
                 image = Image(str(result.screenshot), lazy=0)
@@ -184,5 +190,5 @@ def build_pdf(results, path: Path):
             story.extend(details)
             story.append(KeepTogether(picture))
             if result.error:
-                story.append(Paragraph(pdf_text(result.error), code))
+                story.append(Paragraph(pdf_text(result.error, cjk_font), code))
         doc.build(story)

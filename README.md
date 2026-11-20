@@ -1,197 +1,88 @@
 # web_ss_buddy
 
-Python script that takes screenshots from plain URLs or `httpx` output and generates a PDF screenshot report plus a CSV summary.
+Capture the headed Chromium window for a list of HTTP(S) URLs. The PNGs include the browser chrome and native HTTP Basic and Digest sign-in dialogs. Open the default HTML report offline to browse captures and their metadata.
 
 Vibe coded this to help with web enumeration, especially when working with a large number of live web services. After identifying valid web targets, this tool helps screen capture what each target looks like in a browser.
 
-Enumeration workflow:
+## Install
 
-1. Use Nmap or another scanner to discover open web ports.
-2. Use `httpx` to identify valid live web services.
-3. Pass the URL list or `httpx` output into `web_ss_buddy`.
-4. Generate a PDF report containing browser screenshots.
+Use Linux with Python 3.10 or newer. On Debian and Kali, install system Chromium and the virtual desktop tools, then install the CLI with pipx.
 
-## Features
+```sh
+sudo apt install git pipx chromium xvfb xauth scrot fonts-dejavu-core
+git clone https://github.com/0xdbyx/web_ss_buddy.git
+cd web_ss_buddy
+pipx install .
+web-ss-buddy --doctor
+```
 
-- Accepts plain URL lists
-- Accepts `httpx` output
-- Captures browser screenshots using Chromium
-- Captures browser-level prompts such as basic auth or digest auth popups
-- Records the original URL and final URL
-- Generates a PDF screenshot report
-- Generates a CSV summary
-- Saves screenshots locally
+If your shell cannot find the CLI, run `pipx ensurepath` and open a new terminal. The CLI also accepts `web_ss_buddy` and `python3 web_ss_buddy.py` (when the project dependencies are installed for that Python).
 
-## Installation
+For Playwright-managed Chromium, use `web-ss-buddy --install-browser`. On a supported Debian or Ubuntu host that needs Chromium's shared libraries, run `pipx run --spec 'playwright>=1.49,<2' playwright install-deps chromium` first. Use `--browser-executable /path/to/chromium` to select a specific binary. Run the tool as an ordinary user on a host that supports the Chromium sandbox. Desktop capture requires Xvfb and scrot and is supported on Linux.
 
-Create a Python virtual environment:
+## Capture URLs
 
-    python3 -m venv .venv
+Put one explicit HTTP(S) URL per line in `urls.txt`.
 
-Activate the virtual environment:
+```text
+https://example.com
+http://example.com:8080
+```
 
-    source .venv/bin/activate
+```sh
+web-ss-buddy urls.txt
+```
 
-Install Python dependencies:
+Open `report.html` directly in a browser. Keep the `screenshots/` folder alongside it when moving or sharing the report. Each run gets its own private subdirectory, so previously saved reports keep their original images. Treat reports and screenshots as sensitive when they contain internal URLs or page content.
 
-    pip install pillow playwright pyvirtualdisplay reportlab
+### Optional ProjectDiscovery httpx input
 
-Install Chromium for Playwright:
+The tool also accepts text lines such as `https://example.com [200] [Example Domain] [nginx]`. It uses the leading URL for capture and preserves the full original line in HTML and PDF. Status and title in the reports come from Chromium.
 
-    playwright install chromium
+Use ProjectDiscovery's `httpx` if you have a list of hosts to probe for web services. Put one hostname or IP per line in `hosts.txt`.
 
-Install system dependencies.
+```sh
+httpx -list hosts.txt -ports http:80,https:443,http:8080,https:8443 \
+  -status-code -title -tech-detect -no-color -disable-update-check -output live_web.txt
+web-ss-buddy live_web.txt
+```
 
-On Debian/Ubuntu:
+## Reports
 
-    sudo apt install xvfb scrot
+| Format | Contents |
+| --- | --- |
+| HTML | Large preview, gallery and searchable table. Switch between dark and light within the browser tab. **Copy table** copies matching rows as TSV. |
+| PDF | Portrait A4, with each target starting on a new page. The full input line, original and final URLs, response code, title, capture timestamp and screenshot appear in each entry. Long entries can span pages. |
+| CSV and XLSX | The same six columns in order: `Target,Port,URL,Final URL,Response Code,Title`. Unknown metadata is blank. Text that could be interpreted as a spreadsheet formula is prefixed with an apostrophe. |
 
-Make the script executable:
+```sh
+web-ss-buddy urls.txt -o review.html
+web-ss-buddy urls.txt --format pdf --format xlsx -o review
+web-ss-buddy urls.txt --format csv -o inventory.csv
+web-ss-buddy urls.txt --all-formats -o review.html
+```
 
-    chmod +x web_ss_buddy.py
+Multiple formats share a single capture run. An existing report file at the chosen path is replaced when its new copy is ready. Captures are stored alongside the HTML report, or alongside the first selected report if HTML is omitted.
 
-## Usage
+The original `-o report.pdf` invocation still writes PDF and CSV together. Use `--csv results.csv` to name the CSV or `--format pdf` for PDF alone. With an explicit format, `-o` accepts either a filename in a selected format or a filename stem.
 
-    ./web_ss_buddy.py <input_file> -o <output.pdf>
+## Capture options
 
-Example with URL list:
+| Option | Behavior |
+| --- | --- |
+| `--width 1366 --height 768` | Set the virtual desktop and PNG size. The default is 1366 × 768. |
+| `--wait 10` | Allow the browser to settle after navigation. Adjust for slower pages or client-side redirects. |
+| `--timeout 20` | Set the navigation deadline in seconds. A stalled navigation can still produce a screenshot. |
+| `--user-agent "Mozilla/5.0"` | Override the browser's User-Agent. |
+| `--ignore-cert-errors` | Allow invalid HTTPS certificates. By default Chromium applies its normal certificate checks. |
+| `--skip-invalid` | Report line numbers and continue with valid URLs. |
 
-    ./web_ss_buddy.py urls.txt -o report.pdf
+JavaScript alerts are dismissed automatically, as in the original script. The screenshot can show a new tab opened by a page. The metadata describes the target tab, and all tabs are closed before the next target. A navigation failure can still produce a screenshot of the browser window. If Chromium doesn't expose a final URL, status or title, that field is left unknown.
 
-Example with custom CSV output:
+## Tests
 
-    ./web_ss_buddy.py urls.txt -o report.pdf --csv results.csv
+```sh
+python3 -m unittest discover -s tests -v
+```
 
-Show help:
-
-    ./web_ss_buddy.py -h
-
-## Input Formats
-
-`web_ss_buddy` supports plain URLs and `httpx` output.
-
-Plain URL list:
-
-    https://example.com
-    http://example.com:8080
-    https://test.local/login
-
-`httpx` output:
-
-    https://example.com [200] [Example Domain] [nginx]
-    http://192.168.1.10:8080 [401] [Login] [Apache]
-
-URLs must start with `http://` or `https://`.
-
-## Example Workflow
-
-Use `httpx` to identify live web services:
-
-    cat targets.txt | httpx \
-      -ports 80,443,8080,8443,8000,8888,9000 \
-      -title \
-      -tech-detect \
-      -status-code \
-      -content-length \
-      -follow-redirects \
-      -o live_web.txt
-
-Generate the screenshot report:
-
-    ./web_ss_buddy.py live_web.txt -o report.pdf
-
-This creates:
-
-    screenshots/
-    report.pdf
-    report.csv
-
-## Options
-
-Increase wait time for slow pages or JavaScript redirects:
-
-    ./web_ss_buddy.py live_web.txt -o report.pdf --wait 15
-
-Ignore certificate errors:
-
-    ./web_ss_buddy.py live_web.txt -o report.pdf --ignore-cert-errors
-
-Skip invalid lines instead of stopping the script:
-
-    ./web_ss_buddy.py live_web.txt -o report.pdf --skip-invalid
-
-Use a custom User-Agent:
-
-    ./web_ss_buddy.py live_web.txt -o report.pdf --user-agent "Mozilla/5.0"
-
-Set browser screenshot size:
-
-    ./web_ss_buddy.py live_web.txt -o report.pdf --width 1366 --height 768
-
-Choose a custom CSV filename:
-
-    ./web_ss_buddy.py live_web.txt -o report.pdf --csv results.csv
-
-## PDF Output
-
-The generated PDF report contains these fields for each target:
-
-    Input line
-    Original URL
-    Final URL
-    Response Code
-    Title
-    Date and time screenshot was taken
-    Screenshot
-
-Field meaning:
-
-| Field | Description |
-|---|---|
-| Input line | The original line from the input file |
-| Original URL | The URL extracted from the input line |
-| Final URL | The final browser URL after redirects or JavaScript routing |
-| Response Code | The browser-observed HTTP response code |
-| Title | The page title reported by the browser |
-| Date and time screenshot was taken | Timestamp of when the screenshot was captured |
-| Screenshot | Browser screenshot of the target |
-
-## CSV Output
-
-The tool creates a CSV summary by default using the same output filename as the PDF.
-
-The CSV contains these fields:
-
-| Field | Description |
-|---|---|
-| Target | Hostname or IP extracted from the URL |
-| Port | Port extracted from the URL, or default port based on scheme |
-| URL | Original URL extracted from the input line |
-| Final URL | Final browser URL after redirects or JavaScript routing |
-| Response Code | Browser-observed HTTP response code |
-| Title | Page title reported by the browser |
-
-To choose a custom CSV filename:
-
-    ./web_ss_buddy.py urls.txt -o report.pdf --csv results.csv
-
-## Example Report Entry
-
-Example input line:
-
-    https://example.com [200] [Example Domain] [nginx]
-
-The PDF report will include:
-
-    Input line: https://example.com [200] [Example Domain] [nginx]
-    Original URL: https://example.com
-    Final URL: https://example.com
-    Response Code: 200
-    Title: Example Domain
-    Date and time screenshot was taken: 2026-05-15 12:00:00
-    Screenshot: Embedded screenshot image
-
-The CSV report will include:
-
-    Target,Port,URL,Final URL,Response Code,Title
-    example.com,443,https://example.com,https://example.com,200,Example Domain
+The automated tests use local files and a mocked capture, so they require the Python package dependencies but no browser display or target server.

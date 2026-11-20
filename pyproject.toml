@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "web-ss-buddy"
+version = "1.1.0"
+description = "Capture the headed Chromium window and generate offline screenshot reports"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "Pillow>=10",
+    "playwright>=1.49,<2",
+    "PyVirtualDisplay>=3,<4",
+    "reportlab>=4,<6",
+    "XlsxWriter>=3.2,<4",
+]
+
+[project.scripts]
+web-ss-buddy = "web_ss_buddy.cli:main"
+web_ss_buddy = "web_ss_buddy.cli:main"
+
+[tool.setuptools]
+packages = ["web_ss_buddy"]
+
+[tool.setuptools.package-data]
+web_ss_buddy = ["assets/*.html"]

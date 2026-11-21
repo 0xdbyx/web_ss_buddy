@@ -13,7 +13,7 @@ from zipfile import ZipFile
 from PIL import Image
 
 from web_ss_buddy.capture import Capture
-from web_ss_buddy.cli import main, parser, plan_outputs
+from web_ss_buddy.cli import ART, main, parser, plan_outputs
 from web_ss_buddy.inputs import Target, parse_input_file
 from web_ss_buddy.reports import COLUMNS, build_html, build_pdf, spreadsheet_cell
 
@@ -80,10 +80,11 @@ class OutputTests(unittest.TestCase):
         with (
             patch("web_ss_buddy.cli.check_system"),
             patch("web_ss_buddy.cli.capture_targets", side_effect=capture) as run,
-            redirect_stdout(StringIO()),
+            redirect_stdout(StringIO()) as stdout,
         ):
             self.assertEqual(main([str(self.source), "--all-formats", "-o", str(stem)]), 0)
             run.assert_awaited_once()
+        self.assertTrue(stdout.getvalue().startswith(ART))
 
         with stem.with_suffix(".csv").open(encoding="utf-8-sig", newline="") as file:
             csv_rows = list(csv.reader(file))

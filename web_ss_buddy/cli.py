@@ -17,6 +17,14 @@ from .reports import build_csv, build_html, build_pdf, build_xlsx
 
 EXPORTERS = {"html": build_html, "pdf": build_pdf, "xlsx": build_xlsx, "csv": build_csv}
 
+ART = r"""
+             __               __           __   __
+ _    _____ / /    ___ ___   / /  __ _____/ /__/ /_ __
+| |/|/ / -_) _ \  (_-<(_-<  / _ \/ // / _  / _  / // /
+|__,__/\__/_.__/ /___/___/ /_.__/\_,_/\_,_/\_,_/\_, /
+                                               /___/
+"""
+
 
 def parser():
     cli = argparse.ArgumentParser(
@@ -110,6 +118,7 @@ def main(argv=None):
             return asyncio.run(doctor(args.browser_executable))
         if args.input_file is None:
             cli.error("an input file is required")
+        print(ART, flush=True)
         if not (640 <= args.width <= 7680 and 480 <= args.height <= 4320):
             cli.error("resolution must be between 640 × 480 and 7680 × 4320")
         if not (0 <= args.wait <= 3600 and 0 < args.timeout <= 3600):
